@@ -48,10 +48,12 @@ class IterativeTrainer:
         config: Dict,
         tokenizer,  # ExtendedTokenizer
         device: str = "cuda",
+        model_path: str = "HuggingFaceTB/SmolLM2-135M-Instruct",
     ):
         self.config = config
         self.tokenizer = tokenizer
         self.device = device
+        self.model_path = model_path
 
         # Unpack config
         self.n_rounds = config.get("iterative", {}).get("n_rounds", 20)
@@ -108,7 +110,7 @@ class IterativeTrainer:
 
         # Main model
         self.main_model = SmolLM2Internal(
-            base_model="HuggingFaceTB/SmolLM2-135M-Instruct",
+            base_model=self.model_path,
             n_internal_tokens=4096,
             n_special_tokens=8,
             use_gradient_checkpointing=True,

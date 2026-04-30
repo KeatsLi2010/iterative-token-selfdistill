@@ -77,6 +77,10 @@ def parse_args():
         help="Only run round 0 (baseline)"
     )
     parser.add_argument(
+        "--model-path", type=str, default=None,
+        help="Local model path or HF model name (default: SmolLM2-135M-Instruct local or mirror)"
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Print config and exit"
     )
@@ -104,6 +108,21 @@ def main():
     if args.round_0_only:
         config.setdefault("iterative", {})["n_rounds"] = 0
 
+    # Determine model path
+    if args.model_path:
+        model_path = args.model_path
+    else:
+        # Try local SmolLM2 directory first
+        local_model = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SmolLM2-135M-Instruct")
+        if os.path.isdir(local_model):
+            model_path = local_model
+            print(f"[Info] Using local model: {local_model}")
+        else:
+            # Use HF mirror for mainland China
+            os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+            model_path = "HuggingFaceTB/SmolLM2-135M-Instruct"
+            print(f"[Info] Model not found locally, using HF mirror")
+
     # Dry run
     if args.dry_run:
         print("=== Config ===")
@@ -113,6 +132,8 @@ def main():
         if torch.cuda.is_available():
             print(f"  Device: {torch.cuda.get_device_name(0)}")
             print(f"  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        print(f"\n=== Model Path ===")
+        print(f"  {model_path}")
         return
 
     # Check CUDA
@@ -129,7 +150,7 @@ def main():
     # Initialize tokenizer
     print("\n[Init] Loading tokenizer...")
     tokenizer = ExtendedTokenizer(
-        base_model="HuggingFaceTB/SmolLM2-135M-Instruct"
+        base_model=model_path
     )
 
     # Create trainer
@@ -137,6 +158,7 @@ def main():
         config=config,
         tokenizer=tokenizer,
         device=args.device,
+        model_path=model_path,
     )
 
     # Run
