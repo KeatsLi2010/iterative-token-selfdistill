@@ -1,0 +1,103 @@
+# Iterative Token-Level Self-Distillation
+# 基于 SmolLM2-135M-Instruct
+
+# --- Model (SmolLM2-135M architecture) ---
+model:
+  name: "SmolLM2-135M-Instruct"
+  hf_repo: "HuggingFaceTB/SmolLM2-135M-Instruct"
+  gguf_path: "SmolLM2-135M-Instruct-q4_0.gguf"  # 用户提供的量化模型（用于推理对比）
+  architecture: "llama"
+  n_layers: 30
+  n_heads: 9
+  n_kv_heads: 3           # GQA (grouped-query attention)
+  d_model: 576
+  d_ff: 1536
+  vocab_size: 49152       # SmolLM2 原始词表
+  max_seq_len: 2048
+  rope_theta: 100000.0
+  rms_norm_eps: 1.0e-5
+  dropout: 0.0
+
+# --- 内部 Token 词汇表（核心创新） ---
+internal:
+  n_internal_tokens: 4096   # 内部离散 token 数量
+  # 扩展后总词表 = 49152 (原始) + 4096 (内部) + 8 (特殊)
+  total_vocab_size: 53256   
+  internal_start_id: 49152  # <INTERNAL_START>
+  internal_end_id: 49153    # <INTERNAL_END>
+  internal_base_id: 49154   # <INTERNAL_0> 起始
+  nl_start_id: 53250        # <NL_START>
+  nl_end_id: 53251          # <NL_END>
+  pad_id: 53252             # <PAD>
+  task_math_id: 53253       # <TASK_MATH>
+  task_logic_id: 53254      # <TASK_LOGIC>
+  task_code_id: 53255       # <TASK_CODE>
+
+# --- 数据集 ---
+data:
+  jsonl_path: "sonnet4.6-general%2Ccode%2Cmath%2Cpsychology.jsonl"
+  format: "chat"            # messages: system/user/assistant
+  val_split: 0.05
+  max_samples: null         # null = use all 122373 samples
+
+# --- Training ---
+training:
+  batch_size: 32
+  gradient_accumulation_steps: 2
+  learning_rate: 3.0e-4
+  warmup_steps: 500
+  max_steps_per_round: 5000
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  use_bf16: true            # bfloat16 mixed precision
+
+# --- Iterative Loop ---
+iterative:
+  n_rounds: 20
+  data_mix_ratio: 0.2       # 每轮混入 20% 原始数据
+  sample_temperature_start: 1.2
+  sample_temperature_end: 0.8
+  sample_top_p: 0.95
+  max_internal_tokens_multiplier: 3
+
+# --- Loss Weights ---
+loss:
+  alpha_translation: 0.3
+  beta_task: 0.5
+  gamma_diversity: 0.1
+  entropy_bonus_coeff: 0.05
+
+# --- Translation Model ---
+translator:
+  n_encoder_layers: 6
+  n_decoder_layers: 6
+  d_model: 384
+  n_heads: 6
+  d_ff: 1024
+  dropout: 0.1
+
+# --- Downstream Tasks ---
+tasks:
+  math:
+    dataset: "gsm8k"
+    subset_size: 1000
+    weight: 1.0
+  code:
+    dataset: "mbpp"
+    subset_size: 500
+    weight: 1.0
+  logic:
+    dataset: "logiqa"
+    subset_size: 500
+    weight: 0.5
+
+# --- Evaluation ---
+eval:
+  eval_every_n_steps: 500
+
+# --- Logging ---
+logging:
+  wandb_project: "iterative-token-selfdistill"
+  log_every_n_steps: 50
+  save_every_n_steps: 1000
+  checkpoint_dir: "./checkpoints"

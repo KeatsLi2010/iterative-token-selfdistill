@@ -1,0 +1,94 @@
+# Iterative Token-Level Self-Distillation Experiment
+
+# --- Model ---
+model:
+  name: "gpt2-small-internal"
+  n_layers: 12
+  n_heads: 12
+  d_model: 768
+  d_ff: 3072
+  vocab_size: 54361       # 50257 (natural) + 4096 (internal) + 8 (special)
+  max_seq_len: 2048
+  pos_encoding: "rope"
+  dropout: 0.1
+
+# --- Tokenizer ---
+tokenizer:
+  base: "gpt2"
+  n_internal_tokens: 4096  # internal vocabulary size
+  special_tokens:
+    - "<INTERNAL_START>"   # 50257
+    - "<INTERNAL_END>"     # 50258
+    - "<NL_START>"         # 54355
+    - "<NL_END>"           # 54356
+    - "<PAD>"              # 54357
+    - "<TASK_MATH>"        # 54358
+    - "<TASK_LOGIC>"       # 54359
+    - "<TASK_CODE>"        # 54360
+
+# --- Training ---
+training:
+  batch_size: 64
+  gradient_accumulation_steps: 4
+  learning_rate: 3.0e-4
+  warmup_steps: 1000
+  max_steps_per_round: 10000
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+
+# --- Iterative Loop ---
+iterative:
+  n_rounds: 20
+  data_mix_ratio: 0.2       # 20% original data mixed in each round
+  sample_temperature_start: 1.2
+  sample_temperature_end: 0.8
+  sample_top_p: 0.95
+  max_internal_tokens_multiplier: 3  # max internal tokens = original_len * this
+
+# --- Loss Weights ---
+loss:
+  alpha_translation: 0.3    # translation model back-translation loss
+  beta_task: 0.5            # downstream task loss
+  gamma_diversity: 0.1      # entropy bonus / diversity regularizer
+  entropy_bonus_coeff: 0.05
+
+# --- Translation Model ---
+translator:
+  n_encoder_layers: 6
+  n_decoder_layers: 6
+  d_model: 512
+  n_heads: 8
+  d_ff: 2048
+  dropout: 0.1
+
+# --- Downstream Tasks ---
+tasks:
+  math:
+    dataset: "gsm8k"
+    subset_size: 1000
+    weight: 1.0
+  code:
+    dataset: "mbpp"
+    subset_size: 500
+    weight: 1.0
+  logic:
+    dataset: "logiqa"
+    subset_size: 500
+    weight: 0.5
+
+# --- Evaluation ---
+eval:
+  eval_every_n_steps: 500
+  metrics:
+    - "perplexity"
+    - "token_entropy"
+    - "effective_token_usage"
+    - "translation_bleu"
+    - "downstream_accuracy"
+
+# --- Logging ---
+logging:
+  wandb_project: "iterative-token-selfdistill"
+  log_every_n_steps: 100
+  save_every_n_steps: 2000
+  checkpoint_dir: "./experiments/checkpoints"

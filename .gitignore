@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Experiments
+experiments/checkpoints/
+experiments/*/checkpoints/
+*.pt
+*.bin
+*.safetensors
+
+# Results
+results/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data
+data/raw/
+data/processed/
+
+# WandB
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large files (exceed GitHub 100MB limit)
+*.gguf
+*.jsonl
+
+# Secrets
+.env
+*.key
