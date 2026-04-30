@@ -128,7 +128,7 @@ class SingleRoundTrainer:
 
         # Create scheduler
         self._scheduler = torch.optim.lr_scheduler.LambdaLR(
-            self.optimizer, lambda s: self._get_lr(s, total_steps) / self._get_lr(0, total_steps)
+            self.optimizer, lambda s: self._get_lr(s, total_steps) / self.lr
         )
 
         data_iter = iter(train_loader)

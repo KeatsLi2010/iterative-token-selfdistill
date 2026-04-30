@@ -38,6 +38,7 @@ Thumbs.db
 # Large files (exceed GitHub 100MB limit)
 *.gguf
 *.jsonl
+SmolLM2-135M-Instruct/
 
 # Secrets
 .env
