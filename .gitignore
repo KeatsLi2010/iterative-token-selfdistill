@@ -10,6 +10,9 @@ venv/
 # Checkpoints
 checkpoints/
 
+# Dataset cache
+.cache/
+
 # Experiments
 experiments/checkpoints/
 experiments/*/checkpoints/
