@@ -304,16 +304,10 @@ def test_translator(
         internal_ids = internal_ids.unsqueeze(0).to(device)
 
         # Step 2: Internal → NL (translator)
-        tgt_prefix = torch.tensor([[tokenizer.nl_start_id]], device=device)
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            translated_ids = translator.generate(
-                src=internal_ids,
-                tgt_prefix=tgt_prefix,
-                max_len=256,
-                eos_id=tokenizer.nl_end_id,
-            )
-        translated_text = tokenizer.decode(
-            translated_ids[0].cpu(), skip_special_tokens=True,
+        translated_text = translator.translate(
+            src_ids=internal_ids[0],
+            tokenizer=tokenizer,
+            max_len=256,
         )
         print(f"Translated:  {translated_text[:200]}")
 
@@ -419,17 +413,13 @@ def interactive_mode(checkpoint_path: str, device: str = "cuda"):
                 temperature=temp, device=device,
             )
             mask = result["internal_mask"]
-            internal_ids = result["full_ids"][mask].unsqueeze(0).to(device)
+            internal_ids = result["full_ids"][mask].to(device)
 
-            tgt_prefix = torch.tensor([[tokenizer.nl_start_id]], device=device)
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                translated_ids = translator.generate(
-                    src=internal_ids,
-                    tgt_prefix=tgt_prefix,
-                    max_len=256,
-                    eos_id=tokenizer.nl_end_id,
-                )
-            translated = tokenizer.decode(translated_ids[0].cpu(), skip_special_tokens=True)
+            translated = translator.translate(
+                src_ids=internal_ids,
+                tokenizer=tokenizer,
+                max_len=256,
+            )
             print(f"\nInput: {text[:200]}")
             print(f"Internal: {internal_ids[0].cpu().tolist()}")
             print(f"Translated: {translated}\n")
