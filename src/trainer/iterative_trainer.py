@@ -103,6 +103,52 @@ class IterativeTrainer:
         """估算最大内部 token 数。"""
         return min(nl_token_count * self.max_internal_mult, 256)
 
+    def _save_full_checkpoint(self, tag: str, optimizer=None, extra: dict = None):
+        """保存完整训练状态（模型 + 优化器 + 元信息），防中断。"""
+        ckpt_path = os.path.join(self.checkpoint_dir, tag)
+        os.makedirs(ckpt_path, exist_ok=True)
+
+        # 主模型
+        self.main_model.save_checkpoint(ckpt_path)
+
+        # 翻译模型
+        if self.translator is not None:
+            self._save_translator(os.path.join(ckpt_path, "translator.pt"))
+
+        # 优化器状态（用于恢复训练）
+        if optimizer is not None:
+            torch.save(optimizer.state_dict(), os.path.join(ckpt_path, "optimizer.pt"))
+
+        # 元信息
+        meta = {
+            "round": self.current_round,
+            "timestamp": time.time(),
+            "results_log_length": len(self.results_log),
+        }
+        if extra:
+            meta.update(extra)
+        with open(os.path.join(ckpt_path, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2, default=str)
+
+        # 结果日志（每次都存，防丢失）
+        self._save_results()
+
+        print(f"\n  [Checkpoint] Saved to {ckpt_path}")
+
+    def _make_save_callback(self, trainer_obj, round_num: int):
+        """创建一个每 N 步自动保存的回调函数。"""
+        save_every = self.save_every
+
+        def save_callback(step: int, metrics: dict):
+            if step > 0 and step % save_every == 0:
+                self.current_round = round_num
+                self._save_full_checkpoint(
+                    f"round_{round_num}_step_{step}",
+                    optimizer=trainer_obj.optimizer,
+                    extra={"step": step, "metrics": metrics},
+                )
+        return save_callback
+
     def initialize_models(self):
         """初始化主模型和翻译模型。"""
         print("\n" + "=" * 60)
@@ -165,12 +211,14 @@ class IterativeTrainer:
         )
 
         # Train
+        self.current_round = 0
         metrics = trainer.train_round(
             train_loader=train_loader,
             val_loader=val_loader,
             max_steps=self.max_steps_per_round,
             round_num=0,
             use_internal_loss=False,
+            callback=self._make_save_callback(trainer, 0),
         )
 
         metrics["temperature"] = self.temperature_start
@@ -220,6 +268,15 @@ class IterativeTrainer:
         )
 
         print(f"  Generated {len(internal_sequences)} internal sequences")
+
+        # Save after expensive rephrase phase (prevent redo on crash)
+        self.current_round = round_num
+        torch.save(internal_sequences, os.path.join(
+            self.checkpoint_dir, f"round_{round_num}_sequences.pt"))
+        self._save_full_checkpoint(
+            f"round_{round_num}_after_rephrase",
+            extra={"phase": "after_rephrase", "n_sequences": len(internal_sequences)},
+        )
 
         # ========== Phase 2: Data Mixing ==========
         print(f"\n  [Phase 2] Mixing data ({1-self.data_mix_ratio:.0%} internal + {self.data_mix_ratio:.0%} original)...")
@@ -281,12 +338,14 @@ class IterativeTrainer:
             val_split=self.val_split,
         )
 
+        self.current_round = round_num
         metrics = trainer.train_round(
             train_loader=mixed_loader,
             val_loader=val_loader,
             max_steps=self.max_steps_per_round // 2,  # fewer steps per round
             round_num=round_num,
             use_internal_loss=True,
+            callback=self._make_save_callback(trainer, round_num),
         )
 
         # ========== Phase 4: Train Translator ==========
