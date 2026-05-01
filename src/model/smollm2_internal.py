@@ -75,14 +75,23 @@ class SmolLM2Internal(nn.Module):
             print("[SmolLM2Internal] Gradient checkpointing enabled")
 
         # Torch compile (optional, may fail on some CUDA versions)
+        # Triton is required for inductor backend; unavailable on Windows.
         self._compiled = False
         try:
-            if hasattr(torch, 'compile'):
+            import triton  # noqa: F401
+            _triton_ok = True
+        except ImportError:
+            _triton_ok = False
+
+        if _triton_ok and hasattr(torch, 'compile'):
+            try:
                 self.model = torch.compile(self.model, mode="reduce-overhead")
                 self._compiled = True
                 print("[SmolLM2Internal] torch.compile enabled")
-        except Exception as e:
-            print(f"[SmolLM2Internal] torch.compile skipped: {e}")
+            except Exception as e:
+                print(f"[SmolLM2Internal] torch.compile skipped: {e}")
+        else:
+            print("[SmolLM2Internal] torch.compile skipped: Triton not available (Windows)")
 
         # Build internal token mask for logit restriction
         self._build_token_masks()
