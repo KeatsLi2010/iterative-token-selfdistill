@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader, IterableDataset
 from typing import Optional, List, Dict
 import random
+from functools import partial
 
 
 class ChatDataset(Dataset):
@@ -268,7 +269,7 @@ def create_dataloaders(
         train_ds,
         batch_size=batch_size,
         shuffle=True,
-        collate_fn=lambda b: collate_chat_batch(b, pad_id),
+        collate_fn=partial(collate_chat_batch, pad_token_id=pad_id),
         num_workers=num_workers,
         pin_memory=True,
     )
@@ -276,7 +277,7 @@ def create_dataloaders(
         val_ds,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=lambda b: collate_chat_batch(b, pad_id),
+        collate_fn=partial(collate_chat_batch, pad_token_id=pad_id),
         num_workers=num_workers,
         pin_memory=True,
     )

@@ -18,6 +18,7 @@ import torch
 import json
 import os
 import time
+from functools import partial
 from typing import Optional, Dict, List
 from pathlib import Path
 
@@ -245,14 +246,14 @@ class IterativeTrainer:
             internal_dataset,
             batch_size=self.batch_size // 2,
             shuffle=True,
-            collate_fn=lambda b: collate_internal_batch(b, pad_id),
+            collate_fn=partial(collate_internal_batch, pad_token_id=pad_id),
             num_workers=0,
         )
         original_loader = torch.utils.data.DataLoader(
             original_dataset,
             batch_size=self.batch_size // 2,
             shuffle=True,
-            collate_fn=lambda b: collate_chat_batch(b, pad_id),
+            collate_fn=partial(collate_chat_batch, pad_token_id=pad_id),
             num_workers=0,
         )
 
