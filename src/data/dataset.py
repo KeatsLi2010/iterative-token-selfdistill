@@ -10,6 +10,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader, IterableDataset
 from typing import Optional, List, Dict
 import random
+import os
+import pickle
 from functools import partial
 
 
@@ -24,13 +26,10 @@ class ChatDataset(Dataset):
             {"role": "user", "content": "..."},
             {"role": "assistant", "content": "..."}
         ],
-        "model": "...",
-        "category": "...",
         ...
     }
 
-    转换为序列:
-    <NL_START> system_content user_content assistant_content <NL_END>
+    预分词结果缓存到磁盘（.cache/），首次运行较慢，后续秒加载。
     """
 
     def __init__(
@@ -48,7 +47,7 @@ class ChatDataset(Dataset):
         self.split = split
         self.val_split = val_split
 
-        # Load all samples
+        # Load raw samples
         samples = []
         with open(jsonl_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -63,7 +62,7 @@ class ChatDataset(Dataset):
         if max_samples is not None:
             samples = samples[:max_samples]
 
-        print(f"[ChatDataset] Loaded {len(samples)} samples from {jsonl_path}")
+        print(f"[ChatDataset] Loaded {len(samples)} raw samples from {jsonl_path}")
 
         # Split train/val
         random.seed(seed)
@@ -77,10 +76,27 @@ class ChatDataset(Dataset):
         else:
             self.samples = samples
 
-        print(f"[ChatDataset] {split}: {len(self.samples)} samples")
+        # 缓存路径
+        cache_dir = os.path.join(os.path.dirname(jsonl_path) or ".", ".cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        base_name = os.path.splitext(os.path.basename(jsonl_path))[0]
+        self._cache_path = os.path.join(
+            cache_dir, f"{base_name}_{split}_{max_samples}.pkl")
 
-        # Pre-tokenize
-        self._tokenized = self._tokenize_all()
+        # 尝试从缓存加载
+        if os.path.exists(self._cache_path):
+            print(f"[ChatDataset] Loading tokenized data from cache: {self._cache_path}")
+            with open(self._cache_path, "rb") as f:
+                self._tokenized = pickle.load(f)
+            print(f"[ChatDataset] {split}: {len(self._tokenized)} samples (cached)")
+        else:
+            # 首次运行：分块预分词 + 缓存
+            print(f"[ChatDataset] Tokenizing {len(self.samples)} samples (this may take a few minutes)...")
+            self._tokenized = self._tokenize_all()
+            print(f"[ChatDataset] {split}: {len(self._tokenized)} samples (tokenized)")
+            print(f"[ChatDataset] Saving cache to {self._cache_path}")
+            with open(self._cache_path, "wb") as f:
+                pickle.dump(self._tokenized, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def _messages_to_text(self, messages: List[Dict]) -> str:
         """将 messages 转换为纯文本。"""
@@ -99,16 +115,15 @@ class ChatDataset(Dataset):
         return "\n\n".join(parts)
 
     def _tokenize_all(self):
-        """预分词所有样本。"""
+        """预分词所有样本（带进度条）。"""
+        from tqdm import tqdm
         tokenized = []
-        for sample in self.samples:
+        for sample in tqdm(self.samples, desc="Tokenizing", unit="samples"):
             messages = sample.get("messages", [])
             if not messages:
                 continue
 
             text = self._messages_to_text(messages)
-
-            # 构建 chat 序列
             ids = self.tokenizer.build_chat_input(
                 messages, max_length=self.max_length
             )
