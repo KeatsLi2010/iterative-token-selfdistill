@@ -13,28 +13,23 @@ import random
 import os
 import pickle
 from functools import partial
-from multiprocessing import Pool
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-# ─── Worker function (module-level, needed for Windows spawn) ────────
+# ─── Worker function (module-level, for ThreadPoolExecutor) ────────
 
 def _tokenize_one(args):
-    """单个样本的分词 worker。每个进程独立加载 tokenizer。"""
-    sample, base_model, max_length = args
+    """单个样本的分词 worker。"""
+    sample, tokenizer, max_length = args
     try:
         messages = sample.get("messages", [])
         if not messages:
             return None
 
-        # 独立加载 tokenizer（spawn 模式共享不了）
-        from src.tokenizer.extended_tokenizer import ExtendedTokenizer
-        tokenizer = ExtendedTokenizer(base_model=base_model, verbose=False)
-
         ids = tokenizer.build_chat_input(messages, max_length=max_length)
         if len(ids) < 4:
             return None
 
-        # 转纯文本
         parts = []
         for msg in messages:
             role = msg.get("role", "")
@@ -158,26 +153,41 @@ class ChatDataset(Dataset):
         return "\n\n".join(parts)
 
     def _tokenize_all(self):
-        """预分词所有样本（多进程并行 + 进度条）。"""
-        from tqdm import tqdm
+        """预分词所有样本（多线程并行 + 即时进度条）。
 
-        # 准备参数：每个 sample 是一个 (sample_dict, base_model, max_length) 元组
-        task_args = [
-            (s, self.tokenizer.base_model, self.max_length)
-            for s in self.samples
+        HuggingFace Rust tokenizer 编码时释放 GIL，多线程即可并行。
+        tokenizer 实例预先创建（主线程），避免 worker 内重复加载。
+        """
+        from tqdm import tqdm
+        from src.tokenizer.extended_tokenizer import ExtendedTokenizer
+
+        n_workers = min(os.cpu_count() or 4, 8)
+        base_model = self.tokenizer.base_model
+
+        # 预创建 tokenizer 实例（线程安全：每个线程一个独立实例）
+        print(f"[ChatDataset] Loading {n_workers} tokenizer instances...")
+        tokenizers = [
+            ExtendedTokenizer(base_model=base_model, verbose=False)
+            for _ in range(n_workers)
         ]
 
-        # 多进程分词（Windows 下 spawn 模式，每个 worker 独立加载 tokenizer）
-        n_workers = min(os.cpu_count() or 4, 8)
-        tokenized = []
-        with Pool(processes=n_workers) as pool:
-            with tqdm(total=len(task_args), desc="Tokenizing",
-                      unit="samples", mininterval=1.0) as pbar:
-                for result in pool.imap_unordered(_tokenize_one, task_args, chunksize=200):
-                    if result is not None:
-                        tokenized.append(result)
-                    pbar.update(1)
+        # 分配样本到 tokenizer（round-robin，避免锁竞争）
+        task_args = [
+            (self.samples[i], tokenizers[i % n_workers], self.max_length)
+            for i in range(len(self.samples))
+        ]
 
+        print(f"[ChatDataset] Tokenizing {len(task_args)} samples "
+              f"with {n_workers} threads...")
+        tokenized = []
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = [executor.submit(_tokenize_one, args) for args in task_args]
+            for future in tqdm(as_completed(futures), total=len(futures),
+                               desc="Tokenizing", unit="samples",
+                               smoothing=0.1, mininterval=0.2):
+                result = future.result()
+                if result is not None:
+                    tokenized.append(result)
         return tokenized
 
     def __len__(self):
