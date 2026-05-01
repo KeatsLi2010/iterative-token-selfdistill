@@ -28,7 +28,7 @@ def _tokenize_one(args):
 
         # 独立加载 tokenizer（spawn 模式共享不了）
         from src.tokenizer.extended_tokenizer import ExtendedTokenizer
-        tokenizer = ExtendedTokenizer(base_model=base_model)
+        tokenizer = ExtendedTokenizer(base_model=base_model, verbose=False)
 
         ids = tokenizer.build_chat_input(messages, max_length=max_length)
         if len(ids) < 4:

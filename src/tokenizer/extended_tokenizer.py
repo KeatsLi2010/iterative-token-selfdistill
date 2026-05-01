@@ -48,10 +48,12 @@ class ExtendedTokenizer:
     TOTAL_VOCAB_SIZE = 53256     # 49152 + 4096 + 8
     ORIGINAL_VOCAB_SIZE = 49152
 
-    def __init__(self, base_model: str = "HuggingFaceTB/SmolLM2-135M-Instruct"):
+    def __init__(self, base_model: str = "HuggingFaceTB/SmolLM2-135M-Instruct",
+                 verbose: bool = True):
         """
         Args:
             base_model: HuggingFace 模型名，用于加载原始 tokenizer
+            verbose: 是否打印初始化日志（多进程 worker 中应关闭）
         """
         self.base_model = base_model
         self.base_tokenizer = AutoTokenizer.from_pretrained(base_model)
@@ -86,9 +88,10 @@ class ExtendedTokenizer:
         ]
 
         num_added = self.base_tokenizer.add_tokens(ordered_tokens)
-        print(f"[ExtendedTokenizer] Added {num_added} tokens "
-              f"(internal={len(internal_tokens)}, special=8)")
-        print(f"[ExtendedTokenizer] Total vocab: {len(self.base_tokenizer)}")
+        if verbose:
+            print(f"[ExtendedTokenizer] Added {num_added} tokens "
+                  f"(internal={len(internal_tokens)}, special=8)  "
+                  f"→ total vocab: {len(self.base_tokenizer)}")
 
         # Internal token ID 范围
         self.internal_start_id = self.token_to_id("<INTERNAL_START>")
