@@ -50,24 +50,28 @@ def load_model(checkpoint_path: str, device: str = "cuda"):
     if not ckpt.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    # 确定 base model 路径
-    # 如果 checkpoint 里包含 config.json，说明是 save_pretrained 保存的完整模型
-    if (ckpt / "config.json").exists():
-        base_model = str(ckpt)
+    # Tokenizer 始终从原始模型加载（checkpoint 不含 tokenizer 文件）
+    # 尝试本地 SmolLM2 目录，否则走 HF mirror
+    local_smollm = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SmolLM2-135M-Instruct")
+    if os.path.isdir(local_smollm):
+        tokenizer_model = local_smollm
     else:
-        base_model = "HuggingFaceTB/SmolLM2-135M-Instruct"
+        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+        tokenizer_model = "HuggingFaceTB/SmolLM2-135M-Instruct"
 
-    print(f"[Test] Loading tokenizer from: {base_model}")
-    tokenizer = ExtendedTokenizer(base_model=base_model)
+    print(f"[Test] Loading tokenizer from: {tokenizer_model}")
+    tokenizer = ExtendedTokenizer(base_model=tokenizer_model)
 
-    print(f"[Test] Loading model from: {checkpoint_path}")
-    if (ckpt / "extended_config.pt").exists():
+    # 加载模型权重
+    has_ckpt = (ckpt / "extended_config.pt").exists()
+    print(f"[Test] Loading model from: {checkpoint_path}" + (" (full ckpt)" if has_ckpt else ""))
+    if has_ckpt:
         model = SmolLM2Internal.from_checkpoint(
             str(ckpt), device=device, use_gradient_checkpointing=False,
         )
     else:
         model = SmolLM2Internal(
-            base_model=base_model,
+            base_model=tokenizer_model,
             n_internal_tokens=4096,
             n_special_tokens=8,
             use_gradient_checkpointing=False,
