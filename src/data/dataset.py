@@ -13,6 +13,49 @@ import random
 import os
 import pickle
 from functools import partial
+from multiprocessing import Pool
+
+
+# ─── Worker function (module-level, needed for Windows spawn) ────────
+
+def _tokenize_one(args):
+    """单个样本的分词 worker。每个进程独立加载 tokenizer。"""
+    sample, base_model, max_length = args
+    try:
+        messages = sample.get("messages", [])
+        if not messages:
+            return None
+
+        # 独立加载 tokenizer（spawn 模式共享不了）
+        from src.tokenizer.extended_tokenizer import ExtendedTokenizer
+        tokenizer = ExtendedTokenizer(base_model=base_model)
+
+        ids = tokenizer.build_chat_input(messages, max_length=max_length)
+        if len(ids) < 4:
+            return None
+
+        # 转纯文本
+        parts = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "system":
+                parts.append(content)
+            elif role == "user":
+                parts.append(f"User: {content}")
+            elif role == "assistant":
+                parts.append(f"Assistant: {content}")
+            else:
+                parts.append(content)
+        text = "\n\n".join(parts)
+
+        return {
+            "input_ids": ids,
+            "text": text,
+            "category": sample.get("category", "general"),
+        }
+    except Exception:
+        return None
 
 
 class ChatDataset(Dataset):
@@ -115,25 +158,25 @@ class ChatDataset(Dataset):
         return "\n\n".join(parts)
 
     def _tokenize_all(self):
-        """预分词所有样本（带进度条）。"""
+        """预分词所有样本（多进程并行 + 进度条）。"""
         from tqdm import tqdm
+
+        # 准备参数：每个 sample 是一个 (sample_dict, base_model, max_length) 元组
+        task_args = [
+            (s, self.tokenizer.base_model, self.max_length)
+            for s in self.samples
+        ]
+
+        # 多进程分词（Windows 下 spawn 模式，每个 worker 独立加载 tokenizer）
+        n_workers = min(os.cpu_count() or 4, 8)
         tokenized = []
-        for sample in tqdm(self.samples, desc="Tokenizing", unit="samples"):
-            messages = sample.get("messages", [])
-            if not messages:
-                continue
-
-            text = self._messages_to_text(messages)
-            ids = self.tokenizer.build_chat_input(
-                messages, max_length=self.max_length
-            )
-
-            if len(ids) >= 4:  # 至少有一些内容
-                tokenized.append({
-                    "input_ids": ids,
-                    "text": text,
-                    "category": sample.get("category", "general"),
-                })
+        with Pool(processes=n_workers) as pool:
+            with tqdm(total=len(task_args), desc="Tokenizing",
+                      unit="samples", mininterval=1.0) as pbar:
+                for result in pool.imap_unordered(_tokenize_one, task_args, chunksize=200):
+                    if result is not None:
+                        tokenized.append(result)
+                    pbar.update(1)
 
         return tokenized
 

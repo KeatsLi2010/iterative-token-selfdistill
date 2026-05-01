@@ -53,6 +53,7 @@ class ExtendedTokenizer:
         Args:
             base_model: HuggingFace 模型名，用于加载原始 tokenizer
         """
+        self.base_model = base_model
         self.base_tokenizer = AutoTokenizer.from_pretrained(base_model)
         self._ensure_pad_token()
 
