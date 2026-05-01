@@ -292,6 +292,10 @@ def test_translator(
     print(f"\n{'='*60}")
     print(f"  Translator Test: NL → Internal → NL")
     print(f"{'='*60}")
+    print(f"  Model vocab: {model.total_vocab_size}")
+    print(f"  Tokenizer vocab: {tokenizer.vocab_size}")
+    print(f"  Translator src_vocab: {translator.src_vocab_size}, tgt_vocab: {translator.tgt_vocab_size}")
+    print(f"  Internal range: [{model.internal_base_id}, {model.internal_base_id + model.n_internal_tokens - 1}]")
 
     for i, text in enumerate(texts[:5]):
         print(f"\n--- Sample {i+1} ---")
@@ -301,11 +305,23 @@ def test_translator(
         result = rephrase_text(model, tokenizer, text, device=device)
         mask = result["internal_mask"]
         internal_ids = result["full_ids"][mask]
-        internal_ids = internal_ids.unsqueeze(0).to(device)
+
+        # Diagnostic: check ID range
+        id_min, id_max = internal_ids.min().item(), internal_ids.max().item()
+        print(f"Internal IDs: {len(internal_ids)} tokens, range [{id_min}, {id_max}]")
+        if id_max >= translator.src_vocab_size:
+            print(f"WARNING: max ID {id_max} >= translator src_vocab {translator.src_vocab_size}!")
+            print(f"  Offending IDs: {[x.item() for x in internal_ids if x >= translator.src_vocab_size][:10]}")
+            print(f"  Skipping translation for this sample.")
+            continue
+        if id_min < 0:
+            print(f"WARNING: negative ID {id_min}!")
+            continue
 
         # Step 2: Internal → NL (translator)
+        src = internal_ids.to(device)
         translated_text = translator.translate(
-            src_ids=internal_ids[0],
+            src_ids=src,
             tokenizer=tokenizer,
             max_len=256,
         )
