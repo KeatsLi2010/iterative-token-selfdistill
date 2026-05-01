@@ -7,6 +7,9 @@ build/
 .venv/
 venv/
 
+# Checkpoints
+checkpoints/
+
 # Experiments
 experiments/checkpoints/
 experiments/*/checkpoints/
