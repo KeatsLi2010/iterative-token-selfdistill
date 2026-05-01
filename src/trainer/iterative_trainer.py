@@ -111,6 +111,17 @@ class IterativeTrainer:
         # 主模型
         self.main_model.save_checkpoint(ckpt_path)
 
+        # Tokenizer（含扩展的内部 token 词表，后续测试必须一致）
+        self.tokenizer.base_tokenizer.save_pretrained(ckpt_path)
+        # ExtendedTokenizer 元信息
+        ext_meta = {
+            "original_vocab_size": self.tokenizer.ORIGINAL_VOCAB_SIZE,
+            "n_internal_tokens": self.tokenizer.N_INTERNAL_TOKENS,
+            "internal_base_id": self.tokenizer.INTERNAL_BASE_ID,
+            "vocab_size": self.tokenizer.vocab_size,
+        }
+        torch.save(ext_meta, os.path.join(ckpt_path, "tokenizer_ext.pt"))
+
         # 翻译模型
         if self.translator is not None:
             self._save_translator(os.path.join(ckpt_path, "translator.pt"))

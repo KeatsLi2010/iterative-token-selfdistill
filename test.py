@@ -45,22 +45,32 @@ from src.eval.metrics import compute_metrics, print_metrics
 # ─── Helper ───────────────────────────────────────────────────────────
 
 def load_model(checkpoint_path: str, device: str = "cuda"):
-    """加载 checkpoint 模型 + tokenizer。"""
+    """加载 checkpoint 模型 + tokenizer（含训练后的完整词表状态）。"""
+    import pickle  # may be needed for tokenizer deserialization
+
     ckpt = Path(checkpoint_path)
     if not ckpt.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    # Tokenizer 始终从原始模型加载（checkpoint 不含 tokenizer 文件）
-    # 尝试本地 SmolLM2 目录，否则走 HF mirror
-    local_smollm = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SmolLM2-135M-Instruct")
-    if os.path.isdir(local_smollm):
-        tokenizer_model = local_smollm
+    # Tokenizer: 优先从 checkpoint 加载（含训练时添加的内部 token）
+    if (ckpt / "tokenizer.json").exists() and (ckpt / "tokenizer_ext.pt").exists():
+        print(f"[Test] Loading tokenizer from checkpoint: {checkpoint_path}")
+        tokenizer = ExtendedTokenizer(base_model=str(ckpt))
+        # 验证词表一致性
+        ext_meta = torch.load(str(ckpt / "tokenizer_ext.pt"), map_location="cpu")
+        assert tokenizer.vocab_size == ext_meta["vocab_size"], \
+            f"Vocab mismatch: {tokenizer.vocab_size} vs {ext_meta['vocab_size']}"
+        print(f"[Test] Tokenizer vocab: {tokenizer.vocab_size}")
     else:
-        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-        tokenizer_model = "HuggingFaceTB/SmolLM2-135M-Instruct"
-
-    print(f"[Test] Loading tokenizer from: {tokenizer_model}")
-    tokenizer = ExtendedTokenizer(base_model=tokenizer_model)
+        # Fallback: 从原始 SmolLM2 创建（仅用于无 checkpoint 的测试）
+        local_smollm = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SmolLM2-135M-Instruct")
+        if os.path.isdir(local_smollm):
+            tokenizer_model = local_smollm
+        else:
+            os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+            tokenizer_model = "HuggingFaceTB/SmolLM2-135M-Instruct"
+        print(f"[Test] Loading tokenizer from base model: {tokenizer_model}")
+        tokenizer = ExtendedTokenizer(base_model=tokenizer_model)
 
     # 加载模型权重
     has_ckpt = (ckpt / "extended_config.pt").exists()
@@ -70,6 +80,9 @@ def load_model(checkpoint_path: str, device: str = "cuda"):
             str(ckpt), device=device, use_gradient_checkpointing=False,
         )
     else:
+        # Fallback: 创建未训练的模型
+        local_smollm = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SmolLM2-135M-Instruct")
+        tokenizer_model = local_smollm if os.path.isdir(local_smollm) else "HuggingFaceTB/SmolLM2-135M-Instruct"
         model = SmolLM2Internal(
             base_model=tokenizer_model,
             n_internal_tokens=4096,
