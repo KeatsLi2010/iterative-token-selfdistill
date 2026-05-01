@@ -41,6 +41,7 @@ class SmolLM2Internal(nn.Module):
         n_special_tokens: int = 8,
         use_gradient_checkpointing: bool = True,
         device: str = "cuda",
+        _skip_extend: bool = False,
     ):
         super().__init__()
 
@@ -62,9 +63,19 @@ class SmolLM2Internal(nn.Module):
             low_cpu_mem_usage=True,
         )
 
-        # Extend vocabulary
+        # Extend vocabulary (skip when loading checkpoint — already extended)
         self.total_vocab_size = self.original_vocab_size + n_internal_tokens + n_special_tokens
-        self._extend_embeddings()
+        # Extend vocabulary (skip when loading checkpoint — already extended)
+        if not _skip_extend:
+            self.total_vocab_size = self.original_vocab_size + n_internal_tokens + n_special_tokens
+            self._extend_embeddings()
+        else:
+            # Loading from checkpoint: embeddings already extended, use actual size
+            embed = self.model.get_input_embeddings()
+            self.original_vocab_size = self.original_vocab_size  # keep config value
+            self.total_vocab_size = embed.weight.shape[0]
+            print(f"[SmolLM2Internal] Skipped embedding extension (loading from checkpoint). "
+                  f"Vocab: {self.total_vocab_size}")
 
         # Move to device
         self.model = self.model.to(device)
@@ -341,15 +352,17 @@ class SmolLM2Internal(nn.Module):
         device: str = "cuda",
         use_gradient_checkpointing: bool = True,
     ):
-        """从 checkpoint 加载。"""
-        config = torch.load(f"{path}/extended_config.pt", map_location="cpu")
+        """从 checkpoint 加载（embedding 已扩展，跳过 _extend_embeddings）。"""
+        ext_cfg = torch.load(f"{path}/extended_config.pt", map_location="cpu")
         instance = cls(
             base_model=path,
-            n_internal_tokens=config["n_internal_tokens"],
+            n_internal_tokens=ext_cfg["n_internal_tokens"],
             n_special_tokens=8,
             use_gradient_checkpointing=use_gradient_checkpointing,
             device=device,
+            _skip_extend=True,
         )
-        instance.total_vocab_size = config["total_vocab_size"]
-        instance.original_vocab_size = config["original_vocab_size"]
+        # 修正 original_vocab_size 并重建 token mask（__init__ 中用的是 config 的 53256）
+        instance.original_vocab_size = ext_cfg["original_vocab_size"]
+        instance._build_token_masks()
         return instance
