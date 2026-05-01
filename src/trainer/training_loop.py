@@ -231,9 +231,10 @@ class SingleRoundTrainer:
             "elapsed_hours": elapsed / 3600,
         }
 
+        val_str = f"{final_val_loss:.4f}" if final_val_loss is not None else "N/A"
         print(f"\n[Round {round_num}] Complete. "
               f"Train loss: {metrics['train_loss']:.4f}, "
-              f"Val loss: {final_val_loss:.4f if final_val_loss else 'N/A'}, "
+              f"Val loss: {val_str}, "
               f"Time: {elapsed/3600:.2f}h")
 
         return metrics
