@@ -327,25 +327,25 @@ class SmolLM2Internal(nn.Module):
                 sampled_idx = torch.multinomial(probs, num_samples=1)
                 next_token = topk_indices[sampled_idx]
 
-            if next_token.item() < self.internal_base_id:
-                # Not an internal token (should be INTERNAL_END)
-                if next_token.item() == self.internal_end_id:
-                    generated = torch.cat([generated, next_token])
-                    internal_positions.append(len(generated) - 1)
-                    if internal_tokens_generated >= min_internal_tokens:
-                        break
-                # Skip non-internal
-                continue
+                if next_token.item() < self.internal_base_id:
+                    # Not an internal token (should be INTERNAL_END)
+                    if next_token.item() == self.internal_end_id:
+                        generated = torch.cat([generated, next_token])
+                        internal_positions.append(len(generated) - 1)
+                        if internal_tokens_generated >= min_internal_tokens:
+                            break
+                    # Skip non-internal
+                    continue
 
-            generated = torch.cat([generated, next_token])
-            internal_positions.append(len(generated) - 1)
-            internal_tokens_generated += 1
+                generated = torch.cat([generated, next_token])
+                internal_positions.append(len(generated) - 1)
+                internal_tokens_generated += 1
 
-            # Prepare next input
-            current_input = next_token.unsqueeze(0)
+                # Prepare next input
+                current_input = next_token.unsqueeze(0)
 
-            if internal_tokens_generated >= max_internal_tokens:
-                break
+                if internal_tokens_generated >= max_internal_tokens:
+                    break
 
         # Force INTERNAL_END if not present
         if generated[-1] != self.internal_end_id:
