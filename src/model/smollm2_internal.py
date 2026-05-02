@@ -237,7 +237,7 @@ class SmolLM2Internal(nn.Module):
             "logits": logits,
         }
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def generate_internal_tokens(
         self,
         prompt_ids: torch.Tensor,
@@ -281,8 +281,9 @@ class SmolLM2Internal(nn.Module):
         past_key_values = None
         current_input = prompt_ids.unsqueeze(0)  # (1, seq_len)
 
-        for step in range(max_internal_tokens + 50):  # extra buffer
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        # 将 autocast 移到循环外，避免每 token 的 context manager 开销
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            for step in range(max_internal_tokens + 50):  # extra buffer
                 outputs = self.model(
                     input_ids=current_input,
                     past_key_values=past_key_values,
@@ -290,29 +291,33 @@ class SmolLM2Internal(nn.Module):
                     return_dict=True,
                 )
 
-            past_key_values = outputs.past_key_values
-            logits = outputs.logits[0, -1, :]  # (vocab_size,)
+                past_key_values = outputs.past_key_values
+                logits = outputs.logits[0, -1, :].float()  # (vocab_size,) — 回到 fp32 做采样
 
-            # Apply internal token restriction
-            logits = logits.masked_fill(~internal_token_mask, float("-inf"))
+                # Apply internal token restriction
+                logits = logits.masked_fill(~internal_token_mask, float("-inf"))
 
-            # Temperature scaling
-            logits = logits / max(temperature, 0.01)
+                # Temperature scaling
+                logits = logits / max(temperature, 0.01)
 
-            # Top-p (nucleus) sampling
-            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-            sorted_indices_to_remove = cumulative_probs > top_p
-            sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
-            sorted_indices_to_remove[0] = False
-            indices_to_remove = sorted_indices_to_remove.scatter(
-                0, sorted_indices, sorted_indices_to_remove
-            )
-            logits[indices_to_remove] = float("-inf")
+                # 优化的 top-p sampling：用 topk 替代全量 sort
+                # 只保留 top-k 个候选（internal token 最多 4096 个，k=1024 足够覆盖 top_p=0.95）
+                k = min(1024, internal_token_mask.sum().item())
+                topk_logits, topk_indices = torch.topk(logits, k, dim=-1)
 
-            # Sample
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
+                # Nucleus sampling on top-k subset
+                probs = F.softmax(topk_logits, dim=-1)
+                cumsum = torch.cumsum(probs, dim=-1)
+                # 找到第一个超过 top_p 的位置，mask 掉后面的
+                mask = cumsum > top_p
+                mask[1:] = mask[:-1].clone()  # shift right: keep the first exceeding token
+                mask[0] = False
+                topk_logits[mask] = float("-inf")
+
+                # Sample from top-k
+                probs = F.softmax(topk_logits, dim=-1)
+                sampled_idx = torch.multinomial(probs, num_samples=1)
+                next_token = topk_indices[sampled_idx]
 
             if next_token.item() < self.internal_base_id:
                 # Not an internal token (should be INTERNAL_END)

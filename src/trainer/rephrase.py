@@ -13,7 +13,6 @@ import torch
 import torch.nn.functional as F
 from typing import Optional
 from tqdm import tqdm
-import gc
 
 
 class RephraseGenerator:
@@ -82,7 +81,7 @@ class RephraseGenerator:
             "internal_token_count": internal_count,
         }
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def generate_batch(
         self,
         texts: list[str],
@@ -115,12 +114,6 @@ class RephraseGenerator:
                 print(f"[RephraseGenerator] Error on sample: {e}")
                 continue
 
-            # 定期清理 GPU 缓存
-            if len(results) % 100 == 0:
-                torch.cuda.empty_cache()
-                gc.collect()
-
-        torch.cuda.empty_cache()
         return results
 
     @torch.no_grad()

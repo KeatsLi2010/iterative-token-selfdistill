@@ -271,7 +271,7 @@ class IterativeTrainer:
         )
 
         # Generate internal sequences for a subset of training data
-        rephrase_samples = train_samples[:2000]  # 每轮处理 2000 条（可调）
+        rephrase_samples = train_samples[:500]  # 每轮处理 500 条（2000 太慢，早期迭代不需要那么多）
         internal_sequences = self.rephrase_gen.generate_from_dataset(
             samples=rephrase_samples,
             text_key="text",
