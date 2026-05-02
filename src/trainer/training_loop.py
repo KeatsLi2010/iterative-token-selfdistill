@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from typing import Optional, Callable
 import time
 import math
+import contextlib
 from tqdm import tqdm
 
 
@@ -146,7 +147,7 @@ class SingleRoundTrainer:
             batch = {k: v.to(self.device) for k, v in batch.items()}
 
             # Forward
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16) if self.use_bf16 else torch.no_grad():
+            with (torch.autocast(device_type="cuda", dtype=torch.bfloat16) if self.use_bf16 else contextlib.nullcontext()):
                 if use_internal_loss and "loss_mask" in batch:
                     outputs = self.model(
                         input_ids=batch["input_ids"],
@@ -252,7 +253,7 @@ class SingleRoundTrainer:
 
             batch = {k: v.to(self.device) for k, v in batch.items()}
 
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16) if self.use_bf16 else torch.no_grad():
+            with (torch.autocast(device_type="cuda", dtype=torch.bfloat16) if self.use_bf16 else contextlib.nullcontext()):
                 outputs = self.model(
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],

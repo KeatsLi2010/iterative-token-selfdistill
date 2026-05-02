@@ -56,11 +56,26 @@ class SmolLM2Internal(nn.Module):
         self.config = AutoConfig.from_pretrained(base_model)
         self.original_vocab_size = self.config.vocab_size
 
+        # 尝试使用 Flash Attention 2（大幅降低显存）
+        attn_kwargs = {}
+        try:
+            import flash_attn  # noqa: F401
+            attn_kwargs["attn_implementation"] = "flash_attention_2"
+            print("[SmolLM2Internal] Flash Attention 2 enabled")
+        except ImportError:
+            # Fallback: 使用 SDPA（PyTorch 内置优化 attention，比 eager 省显存）
+            if hasattr(torch.nn.functional, "scaled_dot_product_attention"):
+                attn_kwargs["attn_implementation"] = "sdpa"
+                print("[SmolLM2Internal] SDPA attention enabled (Flash Attn not found)")
+            else:
+                print("[SmolLM2Internal] WARNING: Using eager attention (high VRAM usage)")
+
         self.model = AutoModelForCausalLM.from_pretrained(
             base_model,
             torch_dtype=torch.bfloat16,
             device_map=None,  # manual placement
             low_cpu_mem_usage=True,
+            **attn_kwargs,
         )
 
         # Extend vocabulary (skip when loading checkpoint — already extended)

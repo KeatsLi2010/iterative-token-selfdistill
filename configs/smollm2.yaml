@@ -42,8 +42,8 @@ data:
 
 # --- Training ---
 training:
-  batch_size: 32
-  gradient_accumulation_steps: 2
+  batch_size: 4               # RTX 3060 12GB: 4 安全，配合 grad_accum=8 有效 batch=32
+  gradient_accumulation_steps: 8
   learning_rate: 3.0e-4
   warmup_steps: 500
   max_steps_per_round: 5000
