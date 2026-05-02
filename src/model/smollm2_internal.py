@@ -220,17 +220,25 @@ class SmolLM2Internal(nn.Module):
             shift_labels = labels[..., 1:].contiguous()
             shift_mask = loss_mask[..., 1:].contiguous()
 
-            # Compute per-token CE loss
-            ce_loss = F.cross_entropy(
-                shift_logits.view(-1, self.total_vocab_size),
-                shift_labels.view(-1),
-                reduction='none',
-            )
-            ce_loss = ce_loss.view(shift_labels.shape)
+            # 关键修复：只计算 internal token 范围内的 loss
+            # 对全部 53256 token 做 softmax 会导致模型把概率质量浪费在
+            # 49152 个不可能成为目标的 NL token 上 → loss 爆炸（12~16 >> ln(4096)≈8.3）
+            internal_start = self.internal_base_id
+            n_int = self.n_internal_tokens
 
-            # Apply mask and average
-            masked_loss = (ce_loss * shift_mask.float()).sum() / shift_mask.float().sum().clamp(min=1)
-            loss = masked_loss
+            # 提取 internal token logits 并重映射 labels 到 [0, n_internal_tokens)
+            int_logits = shift_logits[..., internal_start:internal_start + n_int]
+            int_labels = (shift_labels - internal_start).clamp(0, n_int - 1)
+
+            # 只在 loss_mask=True 的位置计算 loss
+            valid_mask = shift_mask & (shift_labels >= internal_start) & (shift_labels < internal_start + n_int)
+
+            if valid_mask.any():
+                flat_logits = int_logits[valid_mask]  # (n_valid, n_internal_tokens)
+                flat_labels = int_labels[valid_mask]   # (n_valid,)
+                loss = F.cross_entropy(flat_logits, flat_labels)
+            else:
+                loss = outputs.loss  # fallback: use model's built-in loss
 
         return {
             "loss": loss,
