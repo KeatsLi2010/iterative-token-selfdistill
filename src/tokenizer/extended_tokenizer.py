@@ -168,19 +168,18 @@ class ExtendedTokenizer:
         """
         将 chat 格式的消息转换为 token 序列。
 
-        格式: <NL_START> system_msg user_msg assistant_msg <NL_END>
+        格式: <NL_START> System: ... User: ... Assistant: ... <NL_END>
 
-        Args:
-            messages: [{"role": "system", "content": "..."},
-                       {"role": "user", "content": "..."},
-                       {"role": "assistant", "content": "..."}]
-        Returns:
-            token_ids: (seq_len,) tensor
+        带角色标记，让模型能区分 system/user/assistant 的边界。
         """
         parts = [self.nl_start_id]
         for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            # 添加角色标记（纯文本，模型在 NL 区域内统一预测）
+            role_tag = f"{role.capitalize()}: "
             parts.extend(self.encode(
-                msg["content"], add_special_tokens=False,
+                role_tag + content, add_special_tokens=False,
                 max_length=max_length // len(messages), truncation=True
             ).tolist())
         parts.append(self.nl_end_id)

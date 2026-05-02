@@ -123,6 +123,7 @@ def load_translator(checkpoint_path: str, device: str = "cuda"):
 # ─── Inference ────────────────────────────────────────────────────────
 
 @torch.no_grad()
+@torch.inference_mode()
 def generate_text(
     model, tokenizer, prompt: str,
     max_new_tokens: int = 128,
@@ -130,9 +131,21 @@ def generate_text(
     top_p: float = 0.95,
     device: str = "cuda",
 ) -> str:
-    """标准自然语言文本生成。"""
-    input_ids = tokenizer.encode(prompt, add_special_tokens=True, max_length=1024)
-    input_ids = input_ids.unsqueeze(0).to(device)
+    """标准自然语言文本生成（与训练格式对齐）。"""
+    # 用 token ID 构建 prompt（特殊 token 不能当文本编码）
+    parts = [tokenizer.nl_start_id]
+    parts.extend(tokenizer.encode(
+        f"User: {prompt}\nAssistant:", add_special_tokens=False,
+        max_length=1024, truncation=True
+    ).tolist())
+    # 不加 NL_END — 让模型自己生成它来停止
+    input_ids = torch.tensor(parts, dtype=torch.long).unsqueeze(0).to(device)
+
+    # 限制生成范围：只允许原始 NL token + <NL_END>（防止输出内部 token 导致乱码）
+    nl_mask = tokenizer.nl_token_mask.to(device)
+
+    def restrict_to_nl(input_ids, scores):
+        return scores.masked_fill(~nl_mask, float("-inf"))
 
     generated = model.model.generate(
         input_ids=input_ids,
@@ -141,11 +154,15 @@ def generate_text(
         top_p=top_p,
         do_sample=True,
         pad_token_id=tokenizer.pad_id,
-        eos_token_id=tokenizer.eos_token_id,
+        eos_token_id=tokenizer.nl_end_id,  # 用 <NL_END> 作为停止符
+        logits_processor=[restrict_to_nl],
     )
 
-    full_text = tokenizer.base_tokenizer.decode(generated[0], skip_special_tokens=True)
-    return full_text
+    # 只提取生成的回复部分（去掉 prompt）
+    prompt_len = input_ids.shape[1]
+    response_ids = generated[0, prompt_len:]
+    response_text = tokenizer.base_tokenizer.decode(response_ids, skip_special_tokens=True)
+    return response_text.strip()
 
 
 @torch.no_grad()
