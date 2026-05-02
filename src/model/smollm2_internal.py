@@ -120,7 +120,12 @@ class SmolLM2Internal(nn.Module):
             print("[SmolLM2Internal] torch.compile skipped: Triton not available (Windows)")
 
         # Build internal token mask for logit restriction
-        self._build_token_masks()
+        # 当 _skip_extend=True 时，original_vocab_size 从 checkpoint config 读取
+        # 可能不正确（config.vocab_size 已被 resize 为 total），由 from_checkpoint
+        # 在修正 original_vocab_size 后显式调用 _build_token_masks()
+        if not _skip_extend:
+            self._build_token_masks()
+        # else: masks 由 from_checkpoint 构建
 
         print(f"[SmolLM2Internal] Initialized. Total vocab: {self.total_vocab_size}")
 
