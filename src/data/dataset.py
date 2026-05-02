@@ -311,7 +311,7 @@ def create_dataloaders(
     max_length: int = 2048,
     max_samples: Optional[int] = None,
     val_split: float = 0.05,
-    num_workers: int = 2,
+    num_workers: int = 0,  # Windows: multiprocessing spawn 易卡死，默认 0
 ) -> tuple:
     """创建 train/val dataloaders。"""
     train_ds = ChatDataset(
