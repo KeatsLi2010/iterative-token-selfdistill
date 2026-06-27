@@ -25,10 +25,6 @@ import torch
 # Add src to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.tokenizer.extended_tokenizer import ExtendedTokenizer
-from src.trainer.iterative_trainer import IterativeTrainer
-
-
 def load_config(config_path: str) -> dict:
     """加载 YAML 配置。"""
     with open(config_path, "r", encoding="utf-8") as f:
@@ -148,6 +144,9 @@ def main():
         print(f"  PyTorch: {torch.__version__}")
 
     # Initialize tokenizer
+    from src.tokenizer.extended_tokenizer import ExtendedTokenizer
+    from src.trainer.iterative_trainer import IterativeTrainer
+
     print("\n[Init] Loading tokenizer...")
     tokenizer = ExtendedTokenizer(
         base_model=model_path

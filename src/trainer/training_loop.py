@@ -67,6 +67,11 @@ class SingleRoundTrainer:
         self._total_steps = 0
         self._scheduler = None
 
+    def _autocast_context(self):
+        if self.use_bf16 and torch.device(self.device).type == "cuda":
+            return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        return contextlib.nullcontext()
+
     def _get_lr(self, step: int, total_steps: int) -> float:
         """Cosine decay with linear warmup。"""
         if step < self.warmup_steps:
@@ -147,7 +152,7 @@ class SingleRoundTrainer:
             batch = {k: v.to(self.device) for k, v in batch.items()}
 
             # Forward
-            with (torch.autocast(device_type="cuda", dtype=torch.bfloat16) if self.use_bf16 else contextlib.nullcontext()):
+            with self._autocast_context():
                 if use_internal_loss and "loss_mask" in batch:
                     outputs = self.model(
                         input_ids=batch["input_ids"],
@@ -253,7 +258,7 @@ class SingleRoundTrainer:
 
             batch = {k: v.to(self.device) for k, v in batch.items()}
 
-            with (torch.autocast(device_type="cuda", dtype=torch.bfloat16) if self.use_bf16 else contextlib.nullcontext()):
+            with self._autocast_context():
                 outputs = self.model(
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],

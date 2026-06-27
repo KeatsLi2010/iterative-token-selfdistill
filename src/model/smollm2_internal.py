@@ -17,6 +17,7 @@ from transformers import AutoModelForCausalLM, AutoConfig
 from typing import Optional
 import math
 import warnings
+import contextlib
 
 
 class SmolLM2Internal(nn.Module):
@@ -288,9 +289,14 @@ class SmolLM2Internal(nn.Module):
 
         past_key_values = None
         current_input = prompt_ids.unsqueeze(0)  # (1, seq_len)
+        autocast_context = (
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            if torch.device(device).type == "cuda"
+            else contextlib.nullcontext()
+        )
 
         # 将 autocast 移到循环外，避免每 token 的 context manager 开销
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        with autocast_context:
             for step in range(max_internal_tokens + 50):  # extra buffer
                 outputs = self.model(
                     input_ids=current_input,
@@ -304,6 +310,8 @@ class SmolLM2Internal(nn.Module):
 
                 # Apply internal token restriction
                 logits = logits.masked_fill(~internal_token_mask, float("-inf"))
+                if internal_tokens_generated < min_internal_tokens:
+                    logits[self.internal_end_id] = float("-inf")
 
                 # Temperature scaling
                 logits = logits / max(temperature, 0.01)

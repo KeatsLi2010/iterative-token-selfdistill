@@ -29,17 +29,12 @@ import argparse
 import sys
 import os
 import json
+import math
 import torch
-import torch.nn.functional as F
 from typing import Optional, List, Dict
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from src.tokenizer.extended_tokenizer import ExtendedTokenizer
-from src.model.smollm2_internal import SmolLM2Internal
-from src.trainer.rephrase import RephraseGenerator
-from src.eval.metrics import compute_metrics, print_metrics
 
 
 # ─── Helper ───────────────────────────────────────────────────────────
@@ -47,6 +42,8 @@ from src.eval.metrics import compute_metrics, print_metrics
 def load_model(checkpoint_path: str, device: str = "cuda"):
     """加载 checkpoint 模型 + tokenizer（含训练后的完整词表状态）。"""
     import pickle  # may be needed for tokenizer deserialization
+    from src.tokenizer.extended_tokenizer import ExtendedTokenizer
+    from src.model.smollm2_internal import SmolLM2Internal
 
     ckpt = Path(checkpoint_path)
     if not ckpt.exists():
@@ -174,6 +171,8 @@ def rephrase_text(
     device: str = "cuda",
 ) -> dict:
     """将自然语言文本复述为内部 token 序列。"""
+    from src.trainer.rephrase import RephraseGenerator
+
     gen = RephraseGenerator(
         model=model,
         tokenizer=tokenizer,
@@ -220,12 +219,10 @@ def compute_perplexity(
 
         ids = ids.unsqueeze(0).to(device)
         labels = ids.clone()
-        labels[:, :-1] = ids[:, 1:]
-        labels[:, -1] = -100
 
         outputs = model.model(input_ids=ids, labels=labels)
         loss = outputs.loss
-        n_tokens = (labels != -100).sum().item()
+        n_tokens = max(ids.size(1) - 1, 0)
 
         total_loss += loss.item() * n_tokens
         total_tokens += n_tokens
@@ -261,6 +258,9 @@ def evaluate_checkpoint(
     # 内部 token 测试
     if texts:
         print(f"  Testing rephrase on {min(10, len(texts))} samples...")
+        from src.trainer.rephrase import RephraseGenerator
+        from src.eval.metrics import compute_metrics
+
         gen = RephraseGenerator(
             model=model, tokenizer=tokenizer,
             temperature=1.0, device=device,
@@ -454,7 +454,7 @@ def interactive_mode(checkpoint_path: str, device: str = "cuda"):
                 max_len=256,
             )
             print(f"\nInput: {text[:200]}")
-            print(f"Internal: {internal_ids[0].cpu().tolist()}")
+            print(f"Internal: {internal_ids.cpu().tolist()}")
             print(f"Translated: {translated}\n")
 
         else:
@@ -498,8 +498,6 @@ def parse_args():
 
 
 def main():
-    import math  # needed for perplexity
-
     args = parse_args()
 
     if args.device == "cuda" and not torch.cuda.is_available():

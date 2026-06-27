@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import contextlib
 from typing import Optional
 
 
@@ -151,8 +152,9 @@ class InternalTranslator(nn.Module):
         # Decoder (with causal mask)
         if tgt_mask is None:
             tgt_len = tgt_ids.size(1)
-            tgt_mask = nn.Transformer.generate_square_subsequent_mask(
-                tgt_len, device=tgt_ids.device
+            tgt_mask = torch.triu(
+                torch.ones(tgt_len, tgt_len, dtype=torch.bool, device=tgt_ids.device),
+                diagonal=1,
             )
 
         output = self.decoder(
@@ -186,7 +188,9 @@ class InternalTranslator(nn.Module):
         """
         # Shift for teacher forcing
         tgt_input = tgt_ids[:, :-1]
-        tgt_output = tgt_ids[:, 1:]
+        tgt_output = tgt_ids[:, 1:].clone()
+        if tgt_padding_mask is not None:
+            tgt_output = tgt_output.masked_fill(tgt_padding_mask[:, 1:], -100)
 
         logits = self.forward(
             src_ids=src_ids,
@@ -242,8 +246,9 @@ class InternalTranslator(nn.Module):
             tgt_emb = self.tgt_embed(tgt_ids) * math.sqrt(self.d_model)
             tgt_emb = self.pos_decoder(tgt_emb)
 
-            tgt_mask = nn.Transformer.generate_square_subsequent_mask(
-                len(generated), device=device
+            tgt_mask = torch.triu(
+                torch.ones(len(generated), len(generated), dtype=torch.bool, device=device),
+                diagonal=1,
             )
 
             output = self.decoder(tgt_emb, memory, tgt_mask=tgt_mask)
@@ -275,6 +280,8 @@ def train_translator_step(
     tgt_ids: torch.Tensor,
     optimizer: torch.optim.Optimizer,
     use_bf16: bool = True,
+    src_padding_mask: Optional[torch.Tensor] = None,
+    tgt_padding_mask: Optional[torch.Tensor] = None,
 ) -> float:
     """
     单步训练翻译模型。
@@ -291,8 +298,19 @@ def train_translator_step(
     """
     translator.train()
 
-    with torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_bf16 else torch.no_grad():
-        loss = translator.compute_loss(src_ids, tgt_ids)
+    autocast_context = (
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        if use_bf16 and src_ids.device.type == "cuda"
+        else contextlib.nullcontext()
+    )
+
+    with autocast_context:
+        loss = translator.compute_loss(
+            src_ids,
+            tgt_ids,
+            src_padding_mask=src_padding_mask,
+            tgt_padding_mask=tgt_padding_mask,
+        )
 
     optimizer.zero_grad()
     loss.backward()

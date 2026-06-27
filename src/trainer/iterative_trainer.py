@@ -308,18 +308,19 @@ class IterativeTrainer:
 
         # Create loaders
         pad_id = self.tokenizer.pad_id
+        mixed_batch_size = max(1, self.batch_size // 2)
 
         # Mix by alternating batches (simple approach)
         internal_loader = torch.utils.data.DataLoader(
             internal_dataset,
-            batch_size=self.batch_size // 2,
+            batch_size=mixed_batch_size,
             shuffle=True,
             collate_fn=partial(collate_internal_batch, pad_token_id=pad_id),
             num_workers=0,
         )
         original_loader = torch.utils.data.DataLoader(
             original_dataset,
-            batch_size=self.batch_size // 2,
+            batch_size=mixed_batch_size,
             shuffle=True,
             collate_fn=partial(collate_chat_batch, pad_token_id=pad_id),
             num_workers=0,
@@ -340,7 +341,7 @@ class IterativeTrainer:
             entropy_bonus_coeff=self.entropy_coeff,
         )
 
-        val_loader, _ = create_dataloaders(
+        _, val_loader = create_dataloaders(
             jsonl_path=self.jsonl_path,
             tokenizer=self.tokenizer,
             batch_size=self.batch_size,
@@ -456,8 +457,10 @@ class IterativeTrainer:
             # Pad internal sequences
             max_src_len = max(len(s) for s in batch_seqs)
             src_ids = torch.zeros(len(batch_seqs), max_src_len, dtype=torch.long)
+            src_padding_mask = torch.ones(len(batch_seqs), max_src_len, dtype=torch.bool)
             for i, s in enumerate(batch_seqs):
                 src_ids[i, :len(s)] = s
+                src_padding_mask[i, :len(s)] = False
 
             # Tokenize target texts
             tgt_sequences = []
@@ -468,15 +471,29 @@ class IterativeTrainer:
                 tgt_sequences.append(tgt)
                 max_tgt_len = max(max_tgt_len, len(tgt))
 
-            tgt_ids = torch.zeros(len(batch_seqs), max_tgt_len, dtype=torch.long)
+            tgt_pad_id = self.tokenizer.eos_token_id or 0
+            tgt_ids = torch.full(
+                (len(batch_seqs), max_tgt_len),
+                tgt_pad_id,
+                dtype=torch.long,
+            )
+            tgt_padding_mask = torch.ones(len(batch_seqs), max_tgt_len, dtype=torch.bool)
             for i, t in enumerate(tgt_sequences):
                 tgt_ids[i, :len(t)] = t
+                tgt_padding_mask[i, :len(t)] = False
 
             src_ids = src_ids.to(self.device)
             tgt_ids = tgt_ids.to(self.device)
+            src_padding_mask = src_padding_mask.to(self.device)
+            tgt_padding_mask = tgt_padding_mask.to(self.device)
 
             loss = train_translator_step(
-                self.translator, src_ids, tgt_ids, optimizer,
+                self.translator,
+                src_ids,
+                tgt_ids,
+                optimizer,
+                src_padding_mask=src_padding_mask,
+                tgt_padding_mask=tgt_padding_mask,
             )
             total_loss += loss
 
