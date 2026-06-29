@@ -33,6 +33,7 @@ class RephraseGenerator:
         top_p: float = 0.95,
         max_internal_tokens: int = 256,
         min_internal_tokens: int = 4,
+        max_internal_tokens_multiplier: Optional[float] = None,
         device: str = "cuda",
     ):
         self.model = model
@@ -41,7 +42,19 @@ class RephraseGenerator:
         self.top_p = top_p
         self.max_internal_tokens = max_internal_tokens
         self.min_internal_tokens = min_internal_tokens
+        self.max_internal_tokens_multiplier = max_internal_tokens_multiplier
         self.device = device
+
+    def _estimate_internal_limit(self, text: str) -> int:
+        """Estimate a per-sample internal draft budget."""
+        if self.max_internal_tokens_multiplier is None:
+            return self.max_internal_tokens
+
+        text_ids = self.tokenizer.encode(
+            text, add_special_tokens=False, max_length=2048, truncation=True
+        )
+        estimated = int(len(text_ids) * self.max_internal_tokens_multiplier)
+        return max(self.min_internal_tokens, min(self.max_internal_tokens, estimated))
 
     def generate_single(self, text: str) -> dict:
         """
@@ -60,10 +73,11 @@ class RephraseGenerator:
         """
         prompt_ids = self.tokenizer.build_internal_prompt(text)
         prompt_ids = prompt_ids.to(self.device)
+        internal_limit = self._estimate_internal_limit(text)
 
         full_ids, internal_mask = self.model.generate_internal_tokens(
             prompt_ids=prompt_ids,
-            max_internal_tokens=self.max_internal_tokens,
+            max_internal_tokens=internal_limit,
             temperature=self.temperature,
             top_p=self.top_p,
             min_internal_tokens=self.min_internal_tokens,
@@ -79,6 +93,7 @@ class RephraseGenerator:
             "internal_mask": internal_mask,
             "nl_text": text,
             "internal_token_count": internal_count,
+            "internal_token_limit": internal_limit,
         }
 
     @torch.inference_mode()

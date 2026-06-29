@@ -62,7 +62,8 @@ class IterativeTrainer:
         self.temperature_start = config.get("iterative", {}).get("sample_temperature_start", 1.2)
         self.temperature_end = config.get("iterative", {}).get("sample_temperature_end", 0.8)
         self.top_p = config.get("iterative", {}).get("sample_top_p", 0.95)
-        self.max_internal_mult = config.get("iterative", {}).get("max_internal_tokens_multiplier", 3)
+        self.max_internal_mult = config.get("iterative", {}).get("max_internal_tokens_multiplier", 1.0)
+        self.max_internal_cap = config.get("iterative", {}).get("max_internal_tokens_cap", 256)
 
         self.batch_size = config.get("training", {}).get("batch_size", 8)
         self.grad_accum = config.get("training", {}).get("gradient_accumulation_steps", 2)
@@ -101,7 +102,8 @@ class IterativeTrainer:
 
     def _estimate_internal_limit(self, nl_token_count: int) -> int:
         """估算最大内部 token 数。"""
-        return min(nl_token_count * self.max_internal_mult, 256)
+        estimate = int(nl_token_count * self.max_internal_mult)
+        return max(4, min(estimate, self.max_internal_cap))
 
     def _save_full_checkpoint(self, tag: str, optimizer=None, extra: dict = None):
         """保存完整训练状态（模型 + 优化器 + 元信息），防中断。"""
@@ -265,8 +267,9 @@ class IterativeTrainer:
             tokenizer=self.tokenizer,
             temperature=temp,
             top_p=self.top_p,
-            max_internal_tokens=256,
+            max_internal_tokens=self.max_internal_cap,
             min_internal_tokens=4,
+            max_internal_tokens_multiplier=self.max_internal_mult,
             device=self.device,
         )
 

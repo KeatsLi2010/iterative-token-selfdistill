@@ -43,7 +43,8 @@ iterative:
   sample_temperature_start: 1.2
   sample_temperature_end: 0.8
   sample_top_p: 0.95
-  max_internal_tokens_multiplier: 3  # max internal tokens = original_len * this
+  max_internal_tokens_multiplier: 1.0  # max internal tokens = original_len * this
+  max_internal_tokens_cap: 256
 
 # --- Loss Weights ---
 loss:
